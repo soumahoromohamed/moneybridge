@@ -1,0 +1,830 @@
+import React, { useState, useMemo } from "react";
+import {
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
+  Building2,
+  Smartphone,
+  Banknote,
+  Repeat,
+  Clock,
+  ShieldCheck,
+  FileText,
+} from "lucide-react";
+
+// ---------- Design tokens ----------
+const COLORS = {
+  bg: "#0B1420",
+  bgCard: "#121F30",
+  bgCardAlt: "#16263A",
+  border: "#223349",
+  gold: "#C9A227",
+  goldSoft: "#E4C766",
+  teal: "#1F8A78",
+  textPrimary: "#EDEAE0",
+  textMuted: "#8B96A8",
+  danger: "#D9694F",
+};
+
+// ---------- Business config (editable) ----------
+// Taux de change MAD <-> devise, différents selon le sens de la
+// transaction, pour chaque devise CFA gérée par la plateforme :
+// - Quand on envoie en MAD pour recevoir dans cette devise : 1 MAD = X
+// - Quand on envoie dans cette devise pour recevoir en MAD : 1 MAD = Y
+// (Y > X reflète une marge à l'achat/vente, comme un bureau de change.)
+const DIRECTIONAL_RATES = {
+  XOF: { madToCurrency: 60, currencyToMad: 62 },
+  XAF: { madToCurrency: 60, currencyToMad: 62 },
+};
+
+// Convertit un montant d'une devise à une autre en appliquant le bon taux
+// selon le sens de la transaction.
+function convertAmount(amount, fromCurrency, toCurrency) {
+  if (fromCurrency === toCurrency) return amount;
+
+  if (fromCurrency === "MAD") {
+    return amount * DIRECTIONAL_RATES[toCurrency].madToCurrency;
+  }
+  if (toCurrency === "MAD") {
+    return amount / DIRECTIONAL_RATES[fromCurrency].currencyToMad;
+  }
+
+  // Deux devises CFA entre elles (ex: XOF -> XAF) : on passe par le MAD.
+  const amountInMAD = amount / DIRECTIONAL_RATES[fromCurrency].currencyToMad;
+  return amountInMAD * DIRECTIONAL_RATES[toCurrency].madToCurrency;
+}
+
+// Grille de frais par palier, exprimée en MAD. Le montant envoyé est
+// d'abord converti en MAD pour trouver le palier, puis les frais sont
+// reconvertis dans la devise d'envoi.
+const FEE_TIERS = [
+  { min: 250, max: 650, fee: 30 },
+  { min: 651, max: 1500, fee: 50 },
+  { min: 1501, max: 2500, fee: 70 },
+  { min: 2501, max: 5000, fee: 90 },
+  { min: 5001, max: 15000, fee: 135 },
+  { min: 15001, max: 30000, fee: 170 },
+];
+
+// Montant minimum autorisé pour un envoi, exprimé en CFA. Converti
+// automatiquement dans la devise du réseau choisi via le taux
+// devise -> MAD (le plus défavorable des deux sens).
+const MIN_SEND_CFA = 15000;
+const MIN_SEND_MAD = MIN_SEND_CFA / DIRECTIONAL_RATES.XOF.currencyToMad;
+
+function minSendFor(currency) {
+  if (currency === "MAD") return MIN_SEND_MAD;
+  return MIN_SEND_CFA; // XOF et XAF utilisent tous deux le seuil de 15 000 CFA
+}
+
+const NETWORKS = [
+  { id: "cih", name: "CIH Bank", currency: "MAD", type: "bank", icon: Building2 },
+  { id: "albarid", name: "Al Barid Bank", currency: "MAD", type: "bank", icon: Building2 },
+  { id: "orange", name: "Orange Money", currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "wave", name: "WAVE Money", currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "airtel", name: "Airtel Money", currency: "XAF", type: "mobile", icon: Smartphone },
+  { id: "cash", name: "En espèces", currency: "MAD", type: "cash", icon: Banknote },
+];
+
+const PAY_INFO = {
+  cih: { label: "RIB CIH Bank", value: "230 810 1234567890123456 78" },
+  albarid: { label: "RIB Al Barid Bank", value: "350 810 9876543210987654 12" },
+  orange: { label: "Numéro Orange Money", value: "+225 07 00 11 22 33" },
+  wave: { label: "Numéro WAVE", value: "+225 05 44 55 66 77" },
+  airtel: { label: "Numéro Airtel Money", value: "+241 07 12 34 56 78" },
+  cash: {
+    label: "Point de dépôt espèces",
+    value: "À convenir avec un agent MoneyBridge après votre demande",
+  },
+};
+
+function formatAmount(n, currency) {
+  if (Number.isNaN(n)) return "-";
+  return `${n.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function computeFee(amount, currency) {
+  if (!amount || amount <= 0) return 0;
+
+  // On ramène le montant en MAD pour trouver le bon palier.
+  const amountInMAD = currency === "MAD" ? amount : convertAmount(amount, currency, "MAD");
+
+  let feeMAD;
+  if (amountInMAD < FEE_TIERS[0].min) {
+    feeMAD = FEE_TIERS[0].fee; // en dessous de 250 dh, on applique le palier plancher
+  } else if (amountInMAD > FEE_TIERS[FEE_TIERS.length - 1].max) {
+    feeMAD = FEE_TIERS[FEE_TIERS.length - 1].fee; // au-delà de 30000 dh, palier plafond
+  } else {
+    const tier = FEE_TIERS.find((t) => amountInMAD >= t.min && amountInMAD <= t.max);
+    feeMAD = tier ? tier.fee : FEE_TIERS[FEE_TIERS.length - 1].fee;
+  }
+
+  return currency === "MAD" ? feeMAD : convertAmount(feeMAD, "MAD", currency);
+}
+
+const STEPS = ["Accueil", "J'envoie", "Je reçois", "Paiement", "Confirmation"];
+
+// Numéro WhatsApp qui reçoit les détails de chaque transaction, au format
+// international sans le 0 initial ni le "+".
+const WHATSAPP_NUMBER = "212629227603";
+
+function generateOrderId() {
+  return `MB-${Date.now().toString(36).toUpperCase()}`;
+}
+
+function buildWhatsAppMessage({ orderId, date, sendNetwork, sendAmount, fee, feeMAD, receiveNetwork, receiveAmount, isCash }) {
+  const rateLine =
+    sendNetwork.currency !== receiveNetwork.currency
+      ? `Taux appliqué : ${formatAmount(1, sendNetwork.currency)} = ${formatAmount(
+          convertAmount(1, sendNetwork.currency, receiveNetwork.currency),
+          receiveNetwork.currency
+        )}`
+      : null;
+
+  const lines = [
+    "🧾 *MoneyBridge — Reçu de commande*",
+    `Référence : *${orderId}*`,
+    `Date : ${date}`,
+    "──────────────",
+    "📤 *Envoi*",
+    `Réseau : ${sendNetwork.name}`,
+    `Montant envoyé : ${formatAmount(sendAmount, sendNetwork.currency)}`,
+    "",
+    "📥 *Réception*",
+    `Réseau : ${receiveNetwork.name}`,
+    `Montant à recevoir : ${formatAmount(receiveAmount, receiveNetwork.currency)}`,
+    "",
+    `💰 Frais MoneyBridge : ${formatAmount(feeMAD, "MAD")}`,
+  ];
+  if (rateLine) lines.push(rateLine);
+  lines.push("──────────────");
+  if (!isCash) {
+    lines.push(
+      "📎 Merci d'envoyer une preuve de paiement (capture d'écran ou reçu) juste après ce message."
+    );
+  }
+  lines.push("Merci de votre confiance. Cette commande sera traitée en moins de 10 minutes.");
+  return lines.join("\n");
+}
+
+export default function MoneyBridge() {
+  const [step, setStep] = useState(0);
+  const [sendNetworkId, setSendNetworkId] = useState(null);
+  const [sendAmountStr, setSendAmountStr] = useState("");
+  const [receiveNetworkId, setReceiveNetworkId] = useState(null);
+
+  // Accès admin caché : ajouter #admin à l'URL (ex: monsite.com/#admin).
+  // Invisible et inaccessible pour un visiteur normal qui ne connaît pas
+  // cette route — aucun lien ni bouton n'y mène depuis le parcours client.
+  const [isAdmin, setIsAdmin] = useState(
+    typeof window !== "undefined" && window.location.hash === "#admin"
+  );
+  React.useEffect(() => {
+    const onHashChange = () => setIsAdmin(window.location.hash === "#admin");
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const sendNetwork = NETWORKS.find((n) => n.id === sendNetworkId);
+  const receiveNetwork = NETWORKS.find((n) => n.id === receiveNetworkId);
+  const sendAmount = parseFloat(sendAmountStr.replace(",", "."));
+
+  const fee = useMemo(() => {
+    if (!sendNetwork || !sendAmount) return 0;
+    return computeFee(sendAmount, sendNetwork.currency);
+  }, [sendNetwork, sendAmount]);
+
+  // Les frais sont toujours affichés en dirhams (MAD), quelle que soit la
+  // devise choisie pour l'envoi.
+  const feeMAD = useMemo(() => {
+    if (!sendNetwork || !sendAmount) return 0;
+    const amountInMAD =
+      sendNetwork.currency === "MAD" ? sendAmount : convertAmount(sendAmount, sendNetwork.currency, "MAD");
+    return computeFee(amountInMAD, "MAD");
+  }, [sendNetwork, sendAmount]);
+
+  const receiveAmount = useMemo(() => {
+    if (!sendNetwork || !receiveNetwork || !sendAmount || sendAmount <= 0) return null;
+    const net = Math.max(sendAmount - fee, 0);
+    return convertAmount(net, sendNetwork.currency, receiveNetwork.currency);
+  }, [sendNetwork, receiveNetwork, sendAmount, fee]);
+
+  const minAmount = sendNetwork ? minSendFor(sendNetwork.currency) : null;
+  const belowMin = sendNetwork && sendAmount > 0 && sendAmount < minAmount;
+  const canGoStep2 = sendNetwork && sendAmount > 0 && !belowMin;
+  const canGoStep3 = receiveNetwork && receiveAmount !== null;
+  const canSubmit = Boolean(sendNetwork && receiveNetwork);
+  const [orders, setOrders] = useState([]);
+
+  return (
+    <div style={{ background: COLORS.bg, minHeight: "100vh", color: COLORS.textPrimary }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+        .mb-display { font-family: 'Space Grotesk', sans-serif; }
+        .mb-body { font-family: 'Inter', sans-serif; }
+        .mb-input:focus { outline: 2px solid ${COLORS.gold}; outline-offset: 2px; }
+        .mb-btn:focus-visible { outline: 2px solid ${COLORS.gold}; outline-offset: 2px; }
+        @keyframes mb-pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+        .mb-pulse { animation: mb-pulse 2.2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .mb-pulse { animation: none; } }
+      `}</style>
+
+      {isAdmin ? (
+        <AdminPanel orders={orders} />
+      ) : (
+        <div className="max-w-md mx-auto px-5 pt-8 pb-16 mb-body">
+        <Header sendNetwork={sendNetwork} receiveNetwork={receiveNetwork} />
+
+        {step > 0 && <StepDots step={step} />}
+
+        {step === 0 && <Welcome onStart={() => setStep(1)} />}
+
+        {step === 1 && (
+          <SendStep
+            sendNetworkId={sendNetworkId}
+            setSendNetworkId={setSendNetworkId}
+            sendAmountStr={sendAmountStr}
+            setSendAmountStr={setSendAmountStr}
+            sendNetwork={sendNetwork}
+            fee={fee}
+            feeMAD={feeMAD}
+            minAmount={minAmount}
+            belowMin={belowMin}
+            canGoNext={canGoStep2}
+            onNext={() => setStep(2)}
+          />
+        )}
+
+        {step === 2 && (
+          <ReceiveStep
+            receiveNetworkId={receiveNetworkId}
+            setReceiveNetworkId={setReceiveNetworkId}
+            sendNetwork={sendNetwork}
+            sendAmount={sendAmount}
+            fee={fee}
+            feeMAD={feeMAD}
+            receiveNetwork={receiveNetwork}
+            receiveAmount={receiveAmount}
+            canGoNext={canGoStep3}
+            onNext={() => setStep(3)}
+            onBack={() => setStep(1)}
+          />
+        )}
+
+        {step === 3 && (
+          <PaymentStep
+            sendNetwork={sendNetwork}
+            sendAmount={sendAmount}
+            fee={fee}
+            feeMAD={feeMAD}
+            receiveNetwork={receiveNetwork}
+            receiveAmount={receiveAmount}
+            canSubmit={canSubmit}
+            onSubmit={() => {
+              const orderId = generateOrderId();
+              const date = new Date().toLocaleString("fr-FR");
+              const isCash = sendNetwork.id === "cash";
+
+              setOrders((prev) => [
+                {
+                  id: orderId,
+                  date,
+                  sendNetwork,
+                  sendAmount,
+                  receiveNetwork,
+                  receiveAmount,
+                  feeMAD,
+                  isCash,
+                },
+                ...prev,
+              ]);
+
+              const message = buildWhatsAppMessage({
+                orderId,
+                date,
+                sendNetwork,
+                sendAmount,
+                fee,
+                feeMAD,
+                receiveNetwork,
+                receiveAmount,
+                isCash,
+              });
+              window.open(
+                `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`,
+                "_blank"
+              );
+              setStep(4);
+            }}
+            onBack={() => setStep(2)}
+          />
+        )}
+
+        {step === 4 && <Confirmation isCash={sendNetwork?.id === "cash"} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Header({ sendNetwork, receiveNetwork }) {
+  return (
+    <div className="flex items-center gap-2 mb-6">
+      <div
+        className="w-9 h-9 rounded-full flex items-center justify-center"
+        style={{ background: COLORS.gold }}
+      >
+        <Repeat size={18} color={COLORS.bg} />
+      </div>
+      <span className="mb-display text-lg font-semibold tracking-tight">
+        MoneyBridge
+      </span>
+    </div>
+  );
+}
+
+function StepDots({ step }) {
+  const labels = ["J'envoie", "Je reçois", "Paiement", "Confirmé"];
+  return (
+    <div className="flex items-center gap-1.5 mb-8">
+      {labels.map((label, i) => {
+        const idx = i + 1;
+        const active = idx === step;
+        const done = idx < step;
+        return (
+          <div key={label} className="flex items-center gap-1.5 flex-1">
+            <div
+              className="h-1.5 rounded-full flex-1 transition-all"
+              style={{
+                background: done || active ? COLORS.gold : COLORS.border,
+              }}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Welcome({ onStart }) {
+  return (
+    <div>
+      <div
+        className="mb-pulse text-xs tracking-widest uppercase mb-3"
+        style={{ color: COLORS.teal, letterSpacing: "0.15em" }}
+      >
+        1 MAD → {DIRECTIONAL_RATES.XOF.madToCurrency} XOF · {DIRECTIONAL_RATES.XOF.currencyToMad} XOF → 1 MAD
+        <br />
+        1 MAD → {DIRECTIONAL_RATES.XAF.madToCurrency} XAF · {DIRECTIONAL_RATES.XAF.currencyToMad} XAF → 1 MAD
+      </div>
+      <h1 className="mb-display text-3xl font-bold leading-tight mb-4">
+        Envoyez de l'argent entre le Maroc et l'Afrique de l'Ouest
+      </h1>
+      <p className="mb-6 leading-relaxed" style={{ color: COLORS.textMuted }}>
+        MoneyBridge relie CIH Bank, Al Barid Bank, Orange Money et WAVE. Vous
+        choisissez d'où part l'argent et où il arrive, on calcule le montant
+        reçu au taux du jour, et votre demande est traitée en moins de 10
+        minutes.
+      </p>
+
+      <div
+        className="rounded-2xl p-4 mb-8 space-y-4"
+        style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+      >
+        <HowItWorksRow
+          icon={ArrowRight}
+          title="1. Choisissez l'envoi"
+          text="Réseau d'origine et montant à envoyer."
+        />
+        <HowItWorksRow
+          icon={Repeat}
+          title="2. Choisissez la réception"
+          text="Réseau de destination, montant converti automatiquement."
+        />
+        <HowItWorksRow
+          icon={ShieldCheck}
+          title="3. Payez et confirmez"
+          text="Coordonnées affichées selon le réseau, preuve de paiement à l'appui."
+        />
+      </div>
+
+      <button
+        onClick={onStart}
+        className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+        style={{ background: COLORS.gold, color: COLORS.bg }}
+      >
+        Commencer <ArrowRight size={18} />
+      </button>
+    </div>
+  );
+}
+
+function HowItWorksRow({ icon: Icon, title, text }) {
+  return (
+    <div className="flex gap-3">
+      <div
+        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+        style={{ background: COLORS.bgCardAlt }}
+      >
+        <Icon size={15} color={COLORS.goldSoft} />
+      </div>
+      <div>
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
+          {text}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NetworkPicker({ selectedId, onSelect }) {
+  return (
+    <div className="grid grid-cols-2 gap-2.5">
+      {NETWORKS.map((n) => {
+        const Icon = n.icon;
+        const active = selectedId === n.id;
+        return (
+          <button
+            key={n.id}
+            onClick={() => onSelect(n.id)}
+            className="mb-btn rounded-xl p-3 text-left transition-all"
+            style={{
+              background: active ? "rgba(201,162,39,0.12)" : COLORS.bgCard,
+              border: `1.5px solid ${active ? COLORS.gold : COLORS.border}`,
+            }}
+          >
+            <Icon size={18} color={active ? COLORS.goldSoft : COLORS.textMuted} />
+            <div className="text-sm font-semibold mt-2">{n.name}</div>
+            <div className="text-xs" style={{ color: COLORS.textMuted }}>
+              {n.currency}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SendStep({
+  sendNetworkId,
+  setSendNetworkId,
+  sendAmountStr,
+  setSendAmountStr,
+  sendNetwork,
+  fee,
+  feeMAD,
+  minAmount,
+  belowMin,
+  canGoNext,
+  onNext,
+}) {
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">J'envoie</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>
+        Choisissez le réseau depuis lequel vous envoyez l'argent.
+      </p>
+
+      <NetworkPicker selectedId={sendNetworkId} onSelect={setSendNetworkId} />
+
+      {sendNetwork && (
+        <div
+          className="mt-4 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm"
+          style={{ background: "rgba(201,162,39,0.10)", border: `1px solid ${COLORS.gold}` }}
+        >
+          <ShieldCheck size={16} color={COLORS.goldSoft} className="mt-0.5 shrink-0" />
+          <span>
+            Montant minimum pour cet envoi :{" "}
+            <strong>{formatAmount(minAmount, sendNetwork.currency)}</strong>
+            {sendNetwork.currency !== "MAD"
+              ? ""
+              : ` (soit ${MIN_SEND_CFA.toLocaleString("fr-FR")} CFA)`}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-6">
+        <label className="text-xs uppercase tracking-wide mb-2 block" style={{ color: COLORS.textMuted }}>
+          Montant à envoyer {sendNetwork ? `(${sendNetwork.currency})` : ""}
+        </label>
+        <input
+          className="mb-input w-full rounded-xl px-4 py-3 text-lg mb-display font-semibold"
+          style={{
+            background: COLORS.bgCard,
+            border: `1.5px solid ${belowMin ? COLORS.danger : COLORS.border}`,
+            color: COLORS.textPrimary,
+          }}
+          type="text"
+          inputMode="decimal"
+          placeholder="0.00"
+          value={sendAmountStr}
+          onChange={(e) => setSendAmountStr(e.target.value.replace(/[^0-9.,]/g, ""))}
+        />
+        {belowMin && (
+          <div className="text-xs mt-1.5" style={{ color: COLORS.danger }}>
+            Le montant minimum est de {formatAmount(minAmount, sendNetwork.currency)}
+          </div>
+        )}
+      </div>
+
+      {sendNetwork && sendAmountStr && (
+        <div
+          className="mt-3 rounded-xl px-4 py-3 flex items-center justify-between text-sm"
+          style={{ background: COLORS.bgCardAlt, border: `1px solid ${COLORS.border}` }}
+        >
+          <span style={{ color: COLORS.textMuted }}>Frais MoneyBridge</span>
+          <span className="font-semibold">{formatAmount(feeMAD, "MAD")}</span>
+        </div>
+      )}
+
+      <button
+        onClick={onNext}
+        disabled={!canGoNext}
+        className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2 mt-7"
+        style={{
+          background: canGoNext ? COLORS.gold : COLORS.border,
+          color: canGoNext ? COLORS.bg : COLORS.textMuted,
+        }}
+      >
+        Suivant <ArrowRight size={18} />
+      </button>
+    </div>
+  );
+}
+
+function ReceiveStep({
+  receiveNetworkId,
+  setReceiveNetworkId,
+  sendNetwork,
+  sendAmount,
+  fee,
+  feeMAD,
+  receiveNetwork,
+  receiveAmount,
+  canGoNext,
+  onNext,
+  onBack,
+}) {
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">Je reçois</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>
+        Choisissez le réseau qui recevra l'argent.
+      </p>
+
+      <NetworkPicker selectedId={receiveNetworkId} onSelect={setReceiveNetworkId} />
+
+      <div
+        className="mt-6 rounded-xl p-4 space-y-2.5"
+        style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+      >
+        <Row label="Vous payez" value={formatAmount(sendAmount, sendNetwork.currency)} />
+        <Row label="Frais (déduits)" value={formatAmount(feeMAD, "MAD")} />
+        <div style={{ borderTop: `1px solid ${COLORS.border}` }} className="pt-2.5">
+          <Row
+            label="Montant reçu estimé"
+            value={
+              receiveAmount !== null
+                ? formatAmount(receiveAmount, receiveNetwork.currency)
+                : "—"
+            }
+            emphasize
+          />
+        </div>
+        {receiveNetwork && sendNetwork.currency !== receiveNetwork.currency && (
+          <div className="text-xs" style={{ color: COLORS.textMuted }}>
+            Taux appliqué : 1 {sendNetwork.currency} ={" "}
+            {convertAmount(1, sendNetwork.currency, receiveNetwork.currency).toLocaleString(
+              "fr-FR",
+              { maximumFractionDigits: 4 }
+            )}{" "}
+            {receiveNetwork.currency}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-2.5 mt-7">
+        <button
+          onClick={onBack}
+          className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold flex items-center justify-center"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{
+            background: canGoNext ? COLORS.gold : COLORS.border,
+            color: canGoNext ? COLORS.bg : COLORS.textMuted,
+          }}
+        >
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, emphasize }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm" style={{ color: COLORS.textMuted }}>
+        {label}
+      </span>
+      <span
+        className={emphasize ? "mb-display text-lg font-bold" : "text-sm font-semibold"}
+        style={{ color: emphasize ? COLORS.goldSoft : COLORS.textPrimary }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function PaymentStep({
+  sendNetwork,
+  sendAmount,
+  fee,
+  feeMAD,
+  canSubmit,
+  onSubmit,
+  onBack,
+}) {
+  const info = PAY_INFO[sendNetwork.id];
+  const isCash = sendNetwork.id === "cash";
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">Paiement</h2>
+      <p className="text-sm mb-1" style={{ color: COLORS.textMuted }}>
+        {isCash
+          ? `Préparez ${formatAmount(sendAmount, sendNetwork.currency)} en espèces. Un agent MoneyBridge vous contactera pour organiser la remise.`
+          : `Envoyez ${formatAmount(sendAmount, sendNetwork.currency)} vers les coordonnées ${sendNetwork.name} ci-dessous.`}
+      </p>
+      <p className="text-xs mb-5" style={{ color: COLORS.textMuted }}>
+        Frais MoneyBridge inclus : {formatAmount(feeMAD, "MAD")} (déjà déduits du montant reçu).
+      </p>
+
+      <div
+        className="rounded-xl p-4 mb-5"
+        style={{ background: COLORS.bgCard, border: `1.5px solid ${COLORS.gold}` }}
+      >
+        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.textMuted }}>
+          {info.label}
+        </div>
+        <div className="mb-display text-lg font-bold break-all">{info.value}</div>
+      </div>
+
+      <p className="text-xs mt-3" style={{ color: COLORS.textMuted }}>
+        {isCash
+          ? "En cliquant sur « Confirmer », WhatsApp s'ouvre avec un message pré-rempli récapitulant votre demande. Aucune preuve n'est nécessaire pour un paiement en espèces."
+          : "En cliquant sur « J'ai payé », WhatsApp s'ouvre avec un message pré-rempli récapitulant votre transaction — il vous sera demandé d'y joindre votre preuve de paiement juste après."}
+      </p>
+
+      <div className="flex gap-2.5 mt-5">
+        <button
+          onClick={onBack}
+          className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold flex items-center justify-center"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <button
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{
+            background: canSubmit ? COLORS.gold : COLORS.border,
+            color: canSubmit ? COLORS.bg : COLORS.textMuted,
+          }}
+        >
+          {isCash ? "Confirmer" : "J'ai payé"} <CheckCircle2 size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Confirmation({ isCash }) {
+  return (
+    <div className="flex flex-col items-center text-center pt-10">
+      <div
+        className="w-16 h-16 rounded-full flex items-center justify-center mb-5"
+        style={{ background: "rgba(31,138,120,0.15)" }}
+      >
+        <CheckCircle2 size={32} color={COLORS.teal} />
+      </div>
+      <h2 className="mb-display text-2xl font-bold mb-2">Demande envoyée avec succès</h2>
+      <p className="text-sm mb-6 leading-relaxed" style={{ color: COLORS.textMuted }}>
+        Votre demande a été envoyée avec succès et sera traitée en moins de 10
+        minutes.
+      </p>
+      <div
+        className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold"
+        style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+      >
+        <Clock size={16} color={COLORS.goldSoft} />
+        Traitement estimé : moins de 10 minutes
+      </div>
+      <p className="text-xs mt-5 leading-relaxed" style={{ color: COLORS.textMuted }}>
+        {isCash
+          ? "Un onglet WhatsApp s'est ouvert avec le récapitulatif. Un agent MoneyBridge va vous recontacter pour organiser la remise en espèces."
+          : "Un onglet WhatsApp s'est ouvert avec le récapitulatif. Pensez à y envoyer votre capture de paiement si ce n'est pas déjà fait."}
+      </p>
+    </div>
+  );
+}
+
+function AdminPanel({ orders }) {
+  const totalFeesMAD = orders.reduce((sum, o) => sum + (o.feeMAD || 0), 0);
+
+  return (
+    <div className="max-w-2xl mx-auto px-5 pt-8 pb-16 mb-body">
+      <div className="flex items-center justify-between mb-1">
+        <h1 className="mb-display text-2xl font-bold">Commandes — Admin</h1>
+        <span
+          className="text-xs px-2.5 py-1 rounded-full font-semibold"
+          style={{ background: COLORS.bgCardAlt, color: COLORS.goldSoft }}
+        >
+          {orders.length} commande{orders.length > 1 ? "s" : ""}
+        </span>
+      </div>
+      <p className="text-sm mb-6" style={{ color: COLORS.textMuted }}>
+        Vue interne, accessible uniquement via l'URL secrète #admin. Aucun
+        lien vers cette page n'existe dans le parcours client. Les preuves de
+        paiement arrivent directement sur WhatsApp, pas dans cette liste.
+      </p>
+
+      <div
+        className="rounded-xl p-4 mb-6 flex items-center justify-between"
+        style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+      >
+        <span className="text-sm" style={{ color: COLORS.textMuted }}>
+          Total des frais collectés (session en cours)
+        </span>
+        <span className="mb-display text-lg font-bold" style={{ color: COLORS.goldSoft }}>
+          {formatAmount(totalFeesMAD, "MAD")}
+        </span>
+      </div>
+
+      {orders.length === 0 ? (
+        <div
+          className="rounded-xl p-6 text-center text-sm"
+          style={{ background: COLORS.bgCard, border: `1px dashed ${COLORS.border}`, color: COLORS.textMuted }}
+        >
+          Aucune commande pour l'instant dans cette session.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map((o) => (
+            <div
+              key={o.id}
+              className="rounded-xl p-4"
+              style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="mb-display font-bold text-sm">{o.id}</span>
+                <span className="text-xs" style={{ color: COLORS.textMuted }}>
+                  {o.date}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: COLORS.textMuted }}>
+                  Envoi · {o.sendNetwork.name}
+                </span>
+                <span className="font-semibold">
+                  {formatAmount(o.sendAmount, o.sendNetwork.currency)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span style={{ color: COLORS.textMuted }}>
+                  Réception · {o.receiveNetwork.name}
+                </span>
+                <span className="font-semibold">
+                  {formatAmount(o.receiveAmount, o.receiveNetwork.currency)}
+                </span>
+              </div>
+              <div
+                className="flex items-center justify-between text-xs mt-2 pt-2"
+                style={{ borderTop: `1px solid ${COLORS.border}` }}
+              >
+                <span style={{ color: COLORS.textMuted }}>
+                  Frais : {formatAmount(o.feeMAD, "MAD")}
+                </span>
+                {o.isCash ? (
+                  <span style={{ color: COLORS.textMuted }}>Paiement en espèces</span>
+                ) : (
+                  <span className="flex items-center gap-1" style={{ color: COLORS.goldSoft }}>
+                    <FileText size={13} /> Preuve attendue sur WhatsApp
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,1 @@
+import MoneyBridge from './MoneyBridge'; export default function App() { return <MoneyBridge />; }
