@@ -417,7 +417,21 @@ export default function MoneyBridge() {
           />
         )}
 
-        {step === 6 && <Confirmation isCash={sendNetwork?.id === "cash"} />}
+        {step === 6 && (
+          <Confirmation
+            isCash={sendNetwork?.id === "cash"}
+            onNewOrder={() => {
+              setSendNetworkId(null);
+              setSendAmountStr("");
+              setReceiveNetworkId(null);
+              setClientNom("");
+              setClientPrenom("");
+              setClientEmail("");
+              setReceptionAccount("");
+              setStep(0);
+            }}
+          />
+        )}
         </div>
       )}
     </div>
@@ -967,7 +981,7 @@ function ClientField({ placeholder, value, onChange, type = "text" }) {
   );
 }
 
-function Confirmation({ isCash }) {
+function Confirmation({ isCash, onNewOrder }) {
   return (
     <div className="flex flex-col items-center text-center pt-10">
       <div
@@ -993,6 +1007,13 @@ function Confirmation({ isCash }) {
           ? "Un onglet WhatsApp s'est ouvert avec le récapitulatif. Un agent MoneyBridge va vous recontacter pour organiser la remise en espèces."
           : "Un onglet WhatsApp s'est ouvert avec le récapitulatif. Pensez à y envoyer votre capture de paiement si ce n'est pas déjà fait."}
       </p>
+      <button
+        onClick={onNewOrder}
+        className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2 mt-7"
+        style={{ background: COLORS.gold, color: COLORS.bg }}
+      >
+        Nouvelle demande <ArrowRight size={18} />
+      </button>
     </div>
   );
 }
