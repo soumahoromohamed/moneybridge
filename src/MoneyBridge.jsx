@@ -86,9 +86,9 @@ const NETWORKS = [
   { id: "cash", name: "En espèces", currency: "MAD", type: "cash", icon: Banknote },
 ];
 
-// ⚠️ À REMPLACER par tes vraies coordonnées avant mise en production.
-// Pour les réseaux mobile money, il n'y a généralement pas de RIB — laisse
-// le champ `rib` vide ("") et il ne s'affichera simplement pas.
+// Coordonnées de paiement par réseau (nom, prénom, numéro de compte, RIB).
+// Pour les réseaux mobile money, il n'y a généralement pas de RIB — le
+// champ `rib` reste vide ("") et ne s'affiche simplement pas.
 const PAY_INFO = {
   cih: {
     nom: "SOUMAHORO",
@@ -166,6 +166,7 @@ function generateOrderId() {
 
 function buildWhatsAppMessage({
   orderId,
+  clientNumber,
   date,
   sendNetwork,
   sendAmount,
@@ -188,10 +189,13 @@ function buildWhatsAppMessage({
       : null;
 
   const lines = [
-    "🧾 *MoneyBridge — Reçu de commande*",
-    `Référence : *${orderId}*`,
+    "*🧾 MoneyBridge — Reçu de commande*",
+    "",
+    `Référence : ${orderId}`,
+    `Client Nº : ${clientPrenom} ${clientNom} #${String(clientNumber).padStart(3, "0")}`,
     `Date : ${date}`,
     "──────────────",
+    "",
     "📤 *Envoi*",
     `Réseau : ${sendNetwork.name}`,
     `Montant envoyé : ${formatAmount(sendAmount, sendNetwork.currency)}`,
@@ -208,19 +212,14 @@ function buildWhatsAppMessage({
   lines.push("──────────────");
   if (!isCash) {
     lines.push(
-      "📎 Merci d'envoyer une preuve de paiement (capture d'écran ou reçu) juste après ce message."
+      "*📎 Merci d'envoyer une preuve de paiement (capture d'écran ou reçu) juste après ce message.*"
     );
   }
   lines.push(
-    "",
-    "👤 *Client*",
-    `Nom : ${clientNom}`,
-    `Prénom : ${clientPrenom}`,
-    clientEmail ? `Email : ${clientEmail}` : null,
     "──────────────",
     "Merci de votre confiance. Cette commande sera traitée en moins de 10 minutes."
   );
-  return lines.filter(Boolean).join("\n");
+  return lines.join("\n");
 }
 
 export default function MoneyBridge() {
@@ -371,10 +370,12 @@ export default function MoneyBridge() {
               const orderId = generateOrderId();
               const date = new Date().toLocaleString("fr-FR");
               const isCash = sendNetwork.id === "cash";
+              const clientNumber = orders.length + 1;
 
               setOrders((prev) => [
                 {
                   id: orderId,
+                  clientNumber,
                   date,
                   sendNetwork,
                   sendAmount,
@@ -392,6 +393,7 @@ export default function MoneyBridge() {
 
               const message = buildWhatsAppMessage({
                 orderId,
+                clientNumber,
                 date,
                 sendNetwork,
                 sendAmount,
@@ -1049,7 +1051,7 @@ function AdminPanel({ orders }) {
                 </span>
               </div>
               <div className="text-xs mb-2" style={{ color: COLORS.goldSoft }}>
-                {o.clientPrenom} {o.clientNom}
+                {o.clientPrenom} {o.clientNom} #{String(o.clientNumber).padStart(3, "0")}
                 {o.clientEmail ? ` · ${o.clientEmail}` : ""}
                 {o.receptionAccount ? ` · Réception : ${o.receptionAccount}` : ""}
               </div>
