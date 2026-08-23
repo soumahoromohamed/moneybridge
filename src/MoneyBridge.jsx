@@ -105,8 +105,9 @@ const PAY_INFO = {
   orange: {
     nom: "SOUMAHORO",
     prenom: "MOHAMED RAYAN",
-    numeroCompte: "+225 07 10 25 29 39",
+    numeroCompte: "",
     rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
   },
   wave: {
     nom: "SOUMAHORO",
