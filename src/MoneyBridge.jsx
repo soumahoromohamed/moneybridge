@@ -86,15 +86,47 @@ const NETWORKS = [
   { id: "cash", name: "En espèces", currency: "MAD", type: "cash", icon: Banknote },
 ];
 
+// ⚠️ À REMPLACER par tes vraies coordonnées avant mise en production.
+// Pour les réseaux mobile money, il n'y a généralement pas de RIB — laisse
+// le champ `rib` vide ("") et il ne s'affichera simplement pas.
 const PAY_INFO = {
-  cih: { label: "RIB CIH Bank", value: "230 810 1234567890123456 78" },
-  albarid: { label: "RIB Al Barid Bank", value: "350 810 9876543210987654 12" },
-  orange: { label: "Numéro Orange Money", value: "+225 07 00 11 22 33" },
-  wave: { label: "Numéro WAVE", value: "+225 05 44 55 66 77" },
-  airtel: { label: "Numéro Airtel Money", value: "+241 07 12 34 56 78" },
+  cih: {
+    nom: "SOUMAHORO",
+    prenom: "MOHAMED RAYAN",
+    numeroCompte: "6543905211014700",
+    rib: " 230 815 6543905211014700 74",
+  },
+  albarid: {
+    nom: "SOUMAHORO",
+    prenom: "MOHAMED RAYAN",
+    numeroCompte: "000796N000303756",
+    rib: "350810000000001369283601",
+  },
+  orange: {
+    nom: "SOUMAHORO",
+    prenom: "MOHAMED RAYAN",
+    numeroCompte: "+225 07 10 25 29 39",
+    rib: "",
+  },
+  wave: {
+    nom: "SOUMAHORO",
+    prenom: "MOHAMED RAYAN",
+    numeroCompte: "+225 07 10 25 29 39",
+    rib: "",
+  },
+  airtel: {
+    nom: "MB",
+    prenom: "MB",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
+  },
   cash: {
-    label: "Point de dépôt espèces",
-    value: "À convenir avec un agent MoneyBridge après votre demande",
+    nom: "",
+    prenom: "",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
   },
 };
 
@@ -132,7 +164,21 @@ function generateOrderId() {
   return `MB-${Date.now().toString(36).toUpperCase()}`;
 }
 
-function buildWhatsAppMessage({ orderId, date, sendNetwork, sendAmount, fee, feeMAD, receiveNetwork, receiveAmount, isCash }) {
+function buildWhatsAppMessage({
+  orderId,
+  date,
+  sendNetwork,
+  sendAmount,
+  fee,
+  feeMAD,
+  receiveNetwork,
+  receiveAmount,
+  isCash,
+  clientNom,
+  clientPrenom,
+  clientEmail,
+  receptionAccount,
+}) {
   const rateLine =
     sendNetwork.currency !== receiveNetwork.currency
       ? `Taux appliqué : ${formatAmount(1, sendNetwork.currency)} = ${formatAmount(
@@ -153,9 +199,11 @@ function buildWhatsAppMessage({ orderId, date, sendNetwork, sendAmount, fee, fee
     "📥 *Réception*",
     `Réseau : ${receiveNetwork.name}`,
     `Montant à recevoir : ${formatAmount(receiveAmount, receiveNetwork.currency)}`,
-    "",
-    `💰 Frais MoneyBridge : ${formatAmount(feeMAD, "MAD")}`,
   ];
+  if (receptionAccount) {
+    lines.push(`Coordonnées de réception : ${receptionAccount}`);
+  }
+  lines.push("", `💰 Frais MoneyBridge : ${formatAmount(feeMAD, "MAD")}`);
   if (rateLine) lines.push(rateLine);
   lines.push("──────────────");
   if (!isCash) {
@@ -163,8 +211,16 @@ function buildWhatsAppMessage({ orderId, date, sendNetwork, sendAmount, fee, fee
       "📎 Merci d'envoyer une preuve de paiement (capture d'écran ou reçu) juste après ce message."
     );
   }
-  lines.push("Merci de votre confiance. Cette commande sera traitée en moins de 10 minutes.");
-  return lines.join("\n");
+  lines.push(
+    "",
+    "👤 *Client*",
+    `Nom : ${clientNom}`,
+    `Prénom : ${clientPrenom}`,
+    clientEmail ? `Email : ${clientEmail}` : null,
+    "──────────────",
+    "Merci de votre confiance. Cette commande sera traitée en moins de 10 minutes."
+  );
+  return lines.filter(Boolean).join("\n");
 }
 
 export default function MoneyBridge() {
@@ -172,6 +228,10 @@ export default function MoneyBridge() {
   const [sendNetworkId, setSendNetworkId] = useState(null);
   const [sendAmountStr, setSendAmountStr] = useState("");
   const [receiveNetworkId, setReceiveNetworkId] = useState(null);
+  const [clientNom, setClientNom] = useState("");
+  const [clientPrenom, setClientPrenom] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [receptionAccount, setReceptionAccount] = useState("");
 
   // Accès admin caché : ajouter #admin à l'URL (ex: monsite.com/#admin).
   // Invisible et inaccessible pour un visiteur normal qui ne connaît pas
@@ -213,6 +273,8 @@ export default function MoneyBridge() {
   const belowMin = sendNetwork && sendAmount > 0 && sendAmount < minAmount;
   const canGoStep2 = sendNetwork && sendAmount > 0 && !belowMin;
   const canGoStep3 = receiveNetwork && receiveAmount !== null;
+  const canGoStep4 = Boolean(clientNom.trim() && clientPrenom.trim());
+  const canGoStep5 = receiveNetwork?.type === "cash" || Boolean(receptionAccount.trim());
   const canSubmit = Boolean(sendNetwork && receiveNetwork);
   const [orders, setOrders] = useState([]);
 
@@ -272,6 +334,31 @@ export default function MoneyBridge() {
         )}
 
         {step === 3 && (
+          <ClientInfoStep
+            clientNom={clientNom}
+            setClientNom={setClientNom}
+            clientPrenom={clientPrenom}
+            setClientPrenom={setClientPrenom}
+            clientEmail={clientEmail}
+            setClientEmail={setClientEmail}
+            canGoNext={canGoStep4}
+            onNext={() => setStep(4)}
+            onBack={() => setStep(2)}
+          />
+        )}
+
+        {step === 4 && (
+          <ReceptionCoordsStep
+            receiveNetwork={receiveNetwork}
+            receptionAccount={receptionAccount}
+            setReceptionAccount={setReceptionAccount}
+            canGoNext={canGoStep5}
+            onNext={() => setStep(5)}
+            onBack={() => setStep(3)}
+          />
+        )}
+
+        {step === 5 && (
           <PaymentStep
             sendNetwork={sendNetwork}
             sendAmount={sendAmount}
@@ -295,6 +382,10 @@ export default function MoneyBridge() {
                   receiveAmount,
                   feeMAD,
                   isCash,
+                  clientNom,
+                  clientPrenom,
+                  clientEmail,
+                  receptionAccount,
                 },
                 ...prev,
               ]);
@@ -309,18 +400,22 @@ export default function MoneyBridge() {
                 receiveNetwork,
                 receiveAmount,
                 isCash,
+                clientNom,
+                clientPrenom,
+                clientEmail,
+                receptionAccount,
               });
               window.open(
                 `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`,
                 "_blank"
               );
-              setStep(4);
+              setStep(6);
             }}
-            onBack={() => setStep(2)}
+            onBack={() => setStep(4)}
           />
         )}
 
-        {step === 4 && <Confirmation isCash={sendNetwork?.id === "cash"} />}
+        {step === 6 && <Confirmation isCash={sendNetwork?.id === "cash"} />}
         </div>
       )}
     </div>
@@ -344,7 +439,7 @@ function Header({ sendNetwork, receiveNetwork }) {
 }
 
 function StepDots({ step }) {
-  const labels = ["J'envoie", "Je reçois", "Paiement", "Confirmé"];
+  const labels = ["J'envoie", "Je reçois", "Mes infos", "Réception", "Paiement"];
   return (
     <div className="flex items-center gap-1.5 mb-8">
       {labels.map((label, i) => {
@@ -644,6 +739,129 @@ function Row({ label, value, emphasize }) {
   );
 }
 
+function ClientInfoStep({
+  clientNom,
+  setClientNom,
+  clientPrenom,
+  setClientPrenom,
+  clientEmail,
+  setClientEmail,
+  canGoNext,
+  onNext,
+  onBack,
+}) {
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">Mes coordonnées</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>
+        Ces informations permettent de vous identifier pour le suivi de votre
+        demande.
+      </p>
+
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2.5">
+          <ClientField placeholder="Nom" value={clientNom} onChange={setClientNom} />
+          <ClientField placeholder="Prénom" value={clientPrenom} onChange={setClientPrenom} />
+        </div>
+        <ClientField
+          placeholder="Adresse mail (optionnel)"
+          value={clientEmail}
+          onChange={setClientEmail}
+          type="email"
+        />
+      </div>
+
+      <div className="flex gap-2.5 mt-7">
+        <button
+          onClick={onBack}
+          className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold flex items-center justify-center"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{
+            background: canGoNext ? COLORS.gold : COLORS.border,
+            color: canGoNext ? COLORS.bg : COLORS.textMuted,
+          }}
+        >
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReceptionCoordsStep({
+  receiveNetwork,
+  receptionAccount,
+  setReceptionAccount,
+  canGoNext,
+  onNext,
+  onBack,
+}) {
+  const isCash = receiveNetwork.type === "cash";
+  const label =
+    receiveNetwork.type === "mobile"
+      ? "Numéro de téléphone (réception)"
+      : receiveNetwork.type === "bank"
+      ? "Numéro de compte / RIB (réception)"
+      : "Coordonnées de réception";
+
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">Coordonnées de réception</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>
+        {isCash
+          ? "Vous récupérerez l'argent en espèces, aucune coordonnée n'est nécessaire ici."
+          : `Indiquez où l'argent doit arriver sur ${receiveNetwork.name}.`}
+      </p>
+
+      {isCash ? (
+        <div
+          className="rounded-xl p-4"
+          style={{ background: COLORS.bgCard, border: `1px dashed ${COLORS.border}` }}
+        >
+          <span className="text-sm" style={{ color: COLORS.textMuted }}>
+            Un agent MoneyBridge vous contactera pour organiser la remise.
+          </span>
+        </div>
+      ) : (
+        <ClientField
+          placeholder={label}
+          value={receptionAccount}
+          onChange={setReceptionAccount}
+          type={receiveNetwork.type === "mobile" ? "tel" : "text"}
+        />
+      )}
+
+      <div className="flex gap-2.5 mt-7">
+        <button
+          onClick={onBack}
+          className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold flex items-center justify-center"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}
+        >
+          <ArrowLeft size={18} />
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{
+            background: canGoNext ? COLORS.gold : COLORS.border,
+            color: canGoNext ? COLORS.bg : COLORS.textMuted,
+          }}
+        >
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PaymentStep({
   sendNetwork,
   sendAmount,
@@ -659,23 +877,35 @@ function PaymentStep({
     <div>
       <h2 className="mb-display text-xl font-semibold mb-1">Paiement</h2>
       <p className="text-sm mb-1" style={{ color: COLORS.textMuted }}>
-        {isCash
-          ? `Préparez ${formatAmount(sendAmount, sendNetwork.currency)} en espèces. Un agent MoneyBridge vous contactera pour organiser la remise.`
+        {info.note
+          ? `Préparez ${formatAmount(sendAmount, sendNetwork.currency)}. Un agent MoneyBridge vous contactera pour la suite.`
           : `Envoyez ${formatAmount(sendAmount, sendNetwork.currency)} vers les coordonnées ${sendNetwork.name} ci-dessous.`}
       </p>
       <p className="text-xs mb-5" style={{ color: COLORS.textMuted }}>
         Frais MoneyBridge inclus : {formatAmount(feeMAD, "MAD")} (déjà déduits du montant reçu).
       </p>
 
-      <div
-        className="rounded-xl p-4 mb-5"
-        style={{ background: COLORS.bgCard, border: `1.5px solid ${COLORS.gold}` }}
-      >
-        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.textMuted }}>
-          {info.label}
+      {info.note ? (
+        <div
+          className="rounded-xl p-4 mb-5"
+          style={{ background: COLORS.bgCard, border: `1.5px solid ${COLORS.gold}` }}
+        >
+          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.textMuted }}>
+            {isCash ? "Point de dépôt espèces" : sendNetwork.name}
+          </div>
+          <div className="text-sm font-semibold">{info.note}</div>
         </div>
-        <div className="mb-display text-lg font-bold break-all">{info.value}</div>
-      </div>
+      ) : (
+        <div
+          className="rounded-xl p-4 mb-5 space-y-3"
+          style={{ background: COLORS.bgCard, border: `1.5px solid ${COLORS.gold}` }}
+        >
+          <PayInfoRow label="Nom" value={info.nom} />
+          <PayInfoRow label="Prénom" value={info.prenom} />
+          <PayInfoRow label="Numéro de compte" value={info.numeroCompte} />
+          {info.rib && <PayInfoRow label="RIB" value={info.rib} />}
+        </div>
+      )}
 
       <p className="text-xs mt-3" style={{ color: COLORS.textMuted }}>
         {isCash
@@ -683,7 +913,7 @@ function PaymentStep({
           : "En cliquant sur « J'ai payé », WhatsApp s'ouvre avec un message pré-rempli récapitulant votre transaction — il vous sera demandé d'y joindre votre preuve de paiement juste après."}
       </p>
 
-      <div className="flex gap-2.5 mt-5">
+      <div className="flex gap-2.5 mt-6">
         <button
           onClick={onBack}
           className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold flex items-center justify-center"
@@ -704,6 +934,34 @@ function PaymentStep({
         </button>
       </div>
     </div>
+  );
+}
+
+function PayInfoRow({ label, value }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-0.5" style={{ color: COLORS.textMuted }}>
+        {label}
+      </div>
+      <div className="mb-display text-base font-bold break-all">{value}</div>
+    </div>
+  );
+}
+
+function ClientField({ placeholder, value, onChange, type = "text" }) {
+  return (
+    <input
+      className="mb-input w-full rounded-xl px-4 py-3 text-sm font-semibold"
+      style={{
+        background: COLORS.bgCard,
+        border: `1.5px solid ${COLORS.border}`,
+        color: COLORS.textPrimary,
+      }}
+      type={type}
+      placeholder={placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }
 
@@ -789,6 +1047,11 @@ function AdminPanel({ orders }) {
                 <span className="text-xs" style={{ color: COLORS.textMuted }}>
                   {o.date}
                 </span>
+              </div>
+              <div className="text-xs mb-2" style={{ color: COLORS.goldSoft }}>
+                {o.clientPrenom} {o.clientNom}
+                {o.clientEmail ? ` · ${o.clientEmail}` : ""}
+                {o.receptionAccount ? ` · Réception : ${o.receptionAccount}` : ""}
               </div>
               <div className="flex items-center justify-between text-sm mb-1">
                 <span style={{ color: COLORS.textMuted }}>
