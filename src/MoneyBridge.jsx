@@ -77,14 +77,52 @@ function minSendFor(currency) {
   return MIN_SEND_CFA; // XOF et XAF utilisent tous deux le seuil de 15 000 CFA
 }
 
-const NETWORKS = [
-  { id: "cih", name: "CIH Bank", currency: "MAD", type: "bank", icon: Building2 },
-  { id: "albarid", name: "Al Barid Bank", currency: "MAD", type: "bank", icon: Building2 },
-  { id: "orange", name: "Orange Money", currency: "XOF", type: "mobile", icon: Smartphone },
-  { id: "wave", name: "WAVE Money", currency: "XOF", type: "mobile", icon: Smartphone },
-  { id: "airtel", name: "Airtel Money", currency: "XAF", type: "mobile", icon: Smartphone },
-  { id: "cash", name: "En espèces", currency: "MAD", type: "cash", icon: Banknote },
+const COUNTRIES = [
+  {
+    id: "maroc",
+    name: "Maroc",
+    flag: "🇲🇦",
+    networks: [
+      { id: "cih", name: "CIH Bank", currency: "MAD", type: "bank", icon: Building2 },
+      { id: "albarid", name: "Al Barid Bank", currency: "MAD", type: "bank", icon: Building2 },
+      { id: "attijari", name: "Attijariwafa bank", currency: "MAD", type: "bank", icon: Building2 },
+      { id: "bmce", name: "BMCE Bank of Africa", currency: "MAD", type: "bank", icon: Building2 },
+      { id: "bp_maroc", name: "Banque Populaire", currency: "MAD", type: "bank", icon: Building2 },
+      { id: "cash_maroc", name: "En espèces", currency: "MAD", type: "cash", icon: Banknote },
+    ],
+  },
+  {
+    id: "cote_ivoire",
+    name: "Côte d'Ivoire",
+    flag: "🇨🇮",
+    networks: [
+      { id: "orange_ci", name: "Orange Money", currency: "XOF", type: "mobile", icon: Smartphone },
+      { id: "wave_ci", name: "WAVE Money", currency: "XOF", type: "mobile", icon: Smartphone },
+      { id: "cash_ci", name: "En espèces", currency: "XOF", type: "cash", icon: Banknote },
+    ],
+  },
+  {
+    id: "cameroun",
+    name: "Cameroun",
+    flag: "🇨🇲",
+    networks: [
+      { id: "airtel_cm", name: "Airtel Money", currency: "XAF", type: "mobile", icon: Smartphone },
+      { id: "cash_cm", name: "En espèces", currency: "XAF", type: "cash", icon: Banknote },
+    ],
+  },
 ];
+
+function getCountry(id) {
+  return COUNTRIES.find((country) => country.id === id);
+}
+
+function getNetworksForCountry(countryId) {
+  return getCountry(countryId)?.networks || [];
+}
+
+function getNetwork(countryId, networkId) {
+  return getNetworksForCountry(countryId).find((network) => network.id === networkId);
+}
 
 // Coordonnées de paiement par réseau (nom, prénom, numéro de compte, RIB).
 // Pour les réseaux mobile money, il n'y a généralement pas de RIB — le
@@ -99,36 +137,42 @@ const PAY_INFO = {
   albarid: {
     nom: "SOUMAHORO",
     prenom: "MOHAMED RAYAN",
-    numeroCompte: "000796N000303756",
+    numeroCompte: "1369283601",
     rib: "350810000000001369283601",
   },
-  orange: {
+  orange_ci: {
     nom: "SOUMAHORO",
     prenom: "MOHAMED RAYAN",
     numeroCompte: "",
     rib: "",
     note: "À convenir avec un agent MoneyBridge après votre demande",
   },
-  wave: {
+  wave_ci: {
     nom: "SOUMAHORO",
     prenom: "MOHAMED RAYAN",
     numeroCompte: "+225 07 10 25 29 39",
     rib: "",
   },
-  airtel: {
+  airtel_cm: {
     nom: "MB",
     prenom: "MB",
     numeroCompte: "",
     rib: "",
     note: "À convenir avec un agent MoneyBridge après votre demande",
   },
-  cash: {
+  cash_maroc: {
     nom: "",
     prenom: "",
     numeroCompte: "",
     rib: "",
     note: "À convenir avec un agent MoneyBridge après votre demande",
   },
+  attijari: { nom: "SOUMAHORO", prenom: "MOHAMED RAYAN", numeroCompte: "", rib: "", note: "Coordonnées communiquées par un agent MoneyBridge après votre demande" },
+  bmce: { nom: "SOUMAHORO", prenom: "MOHAMED RAYAN", numeroCompte: "", rib: "", note: "Coordonnées communiquées par un agent MoneyBridge après votre demande" },
+  bp_maroc: { nom: "SOUMAHORO", prenom: "MOHAMED RAYAN", numeroCompte: "", rib: "", note: "Coordonnées communiquées par un agent MoneyBridge après votre demande" },
+  cash_ci: { nom: "", prenom: "", numeroCompte: "", rib: "", note: "À convenir avec un agent MoneyBridge après votre demande" },
+  airtel_cm: { nom: "MB", prenom: "MB", numeroCompte: "", rib: "", note: "À convenir avec un agent MoneyBridge après votre demande" },
+  cash_cm: { nom: "", prenom: "", numeroCompte: "", rib: "", note: "À convenir avec un agent MoneyBridge après votre demande" },
 };
 
 function formatAmount(n, currency) {
@@ -225,8 +269,10 @@ function buildWhatsAppMessage({
 
 export default function MoneyBridge() {
   const [step, setStep] = useState(0);
+  const [sendCountryId, setSendCountryId] = useState(null);
   const [sendNetworkId, setSendNetworkId] = useState(null);
   const [sendAmountStr, setSendAmountStr] = useState("");
+  const [receiveCountryId, setReceiveCountryId] = useState(null);
   const [receiveNetworkId, setReceiveNetworkId] = useState(null);
   const [clientNom, setClientNom] = useState("");
   const [clientPrenom, setClientPrenom] = useState("");
@@ -245,8 +291,12 @@ export default function MoneyBridge() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const sendNetwork = NETWORKS.find((n) => n.id === sendNetworkId);
-  const receiveNetwork = NETWORKS.find((n) => n.id === receiveNetworkId);
+  const sendCountry = getCountry(sendCountryId);
+  const receiveCountry = getCountry(receiveCountryId);
+  const sendNetwork = getNetwork(sendCountryId, sendNetworkId);
+  const receiveNetwork = getNetwork(receiveCountryId, receiveNetworkId);
+  const sendNetworks = getNetworksForCountry(sendCountryId);
+  const receiveNetworks = getNetworksForCountry(receiveCountryId);
   const sendAmount = parseFloat(sendAmountStr.replace(",", "."));
 
   const fee = useMemo(() => {
@@ -271,10 +321,12 @@ export default function MoneyBridge() {
 
   const minAmount = sendNetwork ? minSendFor(sendNetwork.currency) : null;
   const belowMin = sendNetwork && sendAmount > 0 && sendAmount < minAmount;
-  const canGoStep2 = sendNetwork && sendAmount > 0 && !belowMin;
-  const canGoStep3 = receiveNetwork && receiveAmount !== null;
-  const canGoStep4 = Boolean(clientNom.trim() && clientPrenom.trim());
-  const canGoStep5 = receiveNetwork?.type === "cash" || Boolean(receptionAccount.trim());
+  const canGoStep2 = Boolean(sendCountry);
+  const canGoStep3 = Boolean(sendNetwork && sendAmount > 0 && !belowMin);
+  const canGoStep4 = Boolean(receiveCountry);
+  const canGoStep5 = Boolean(receiveNetwork && receiveAmount !== null);
+  const canGoStep6 = Boolean(clientNom.trim() && clientPrenom.trim());
+  const canGoStep7 = receiveNetwork?.type === "cash" || Boolean(receptionAccount.trim());
   const canSubmit = Boolean(sendNetwork && receiveNetwork);
   const [orders, setOrders] = useState([]);
 
@@ -302,6 +354,34 @@ export default function MoneyBridge() {
         {step === 0 && <Welcome onStart={() => setStep(1)} />}
 
         {step === 1 && (
+          <CountryStep
+            title="Pays d'envoi"
+            subtitle="Dans quel pays se trouve l'argent que vous souhaitez envoyer ?"
+            selectedId={sendCountryId}
+            onSelect={(id) => {
+              setSendCountryId(id);
+              setSendNetworkId(null);
+              setSendAmountStr("");
+            }}
+            canGoNext={canGoStep2}
+            onNext={() => setStep(2)}
+          />
+        )}
+
+        {step === 2 && (
+          <NetworkStep
+            title="Réseau d'envoi"
+            subtitle={`Choisissez le réseau depuis lequel vous envoyez l'argent au ${sendCountry?.name}.`}
+            networks={sendNetworks}
+            selectedId={sendNetworkId}
+            onSelect={setSendNetworkId}
+            canGoNext={Boolean(sendNetwork)}
+            onNext={() => setStep(3)}
+            onBack={() => setStep(1)}
+          />
+        )}
+
+        {step === 3 && (
           <SendStep
             sendNetworkId={sendNetworkId}
             setSendNetworkId={setSendNetworkId}
@@ -312,28 +392,46 @@ export default function MoneyBridge() {
             feeMAD={feeMAD}
             minAmount={minAmount}
             belowMin={belowMin}
-            canGoNext={canGoStep2}
-            onNext={() => setStep(2)}
+            canGoNext={canGoStep3}
+            onNext={() => setStep(4)}
+            onBack={() => setStep(2)}
+            hideNetworkPicker
           />
         )}
 
-        {step === 2 && (
+        {step === 4 && (
+          <CountryStep
+            title="Pays de réception"
+            subtitle="Dans quel pays l'argent doit-il être reçu ?"
+            selectedId={receiveCountryId}
+            onSelect={(id) => {
+              setReceiveCountryId(id);
+              setReceiveNetworkId(null);
+            }}
+            canGoNext={canGoStep4}
+            onNext={() => setStep(5)}
+            onBack={() => setStep(3)}
+          />
+        )}
+
+        {step === 5 && (
           <ReceiveStep
             receiveNetworkId={receiveNetworkId}
             setReceiveNetworkId={setReceiveNetworkId}
+            receiveNetworks={receiveNetworks}
             sendNetwork={sendNetwork}
             sendAmount={sendAmount}
             fee={fee}
             feeMAD={feeMAD}
             receiveNetwork={receiveNetwork}
             receiveAmount={receiveAmount}
-            canGoNext={canGoStep3}
-            onNext={() => setStep(3)}
-            onBack={() => setStep(1)}
+            canGoNext={canGoStep5}
+            onNext={() => setStep(6)}
+            onBack={() => setStep(4)}
           />
         )}
 
-        {step === 3 && (
+        {step === 6 && (
           <ClientInfoStep
             clientNom={clientNom}
             setClientNom={setClientNom}
@@ -341,24 +439,24 @@ export default function MoneyBridge() {
             setClientPrenom={setClientPrenom}
             clientEmail={clientEmail}
             setClientEmail={setClientEmail}
-            canGoNext={canGoStep4}
-            onNext={() => setStep(4)}
-            onBack={() => setStep(2)}
+            canGoNext={canGoStep6}
+            onNext={() => setStep(7)}
+            onBack={() => setStep(5)}
           />
         )}
 
-        {step === 4 && (
+        {step === 7 && (
           <ReceptionCoordsStep
             receiveNetwork={receiveNetwork}
             receptionAccount={receptionAccount}
             setReceptionAccount={setReceptionAccount}
-            canGoNext={canGoStep5}
-            onNext={() => setStep(5)}
-            onBack={() => setStep(3)}
+            canGoNext={canGoStep7}
+            onNext={() => setStep(8)}
+            onBack={() => setStep(6)}
           />
         )}
 
-        {step === 5 && (
+        {step === 8 && (
           <PaymentStep
             sendNetwork={sendNetwork}
             sendAmount={sendAmount}
@@ -370,7 +468,7 @@ export default function MoneyBridge() {
             onSubmit={() => {
               const orderId = generateOrderId();
               const date = new Date().toLocaleString("fr-FR");
-              const isCash = sendNetwork.id === "cash";
+              const isCash = sendNetwork?.type === "cash";
               const clientNumber = orders.length + 1;
 
               setOrders((prev) => [
@@ -378,8 +476,10 @@ export default function MoneyBridge() {
                   id: orderId,
                   clientNumber,
                   date,
+                  sendCountry,
                   sendNetwork,
                   sendAmount,
+                  receiveCountry,
                   receiveNetwork,
                   receiveAmount,
                   feeMAD,
@@ -408,22 +508,25 @@ export default function MoneyBridge() {
                 clientEmail,
                 receptionAccount,
               });
+
               window.open(
                 `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`,
                 "_blank"
               );
-              setStep(6);
+              setStep(9);
             }}
-            onBack={() => setStep(4)}
+            onBack={() => setStep(7)}
           />
         )}
 
-        {step === 6 && (
+        {step === 9 && (
           <Confirmation
-            isCash={sendNetwork?.id === "cash"}
+            isCash={sendNetwork?.type === "cash"}
             onNewOrder={() => {
+              setSendCountryId(null);
               setSendNetworkId(null);
               setSendAmountStr("");
+              setReceiveCountryId(null);
               setReceiveNetworkId(null);
               setClientNom("");
               setClientPrenom("");
@@ -432,8 +535,7 @@ export default function MoneyBridge() {
               setStep(0);
             }}
           />
-        )}
-        </div>
+        )}        </div>
       )}
     </div>
   );
@@ -441,7 +543,8 @@ export default function MoneyBridge() {
 
 function Header({ sendNetwork, receiveNetwork }) {
   return (
-    <div className="flex items-center gap-2 mb-6">
+    <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center gap-2">
       <div
         className="w-9 h-9 rounded-full flex items-center justify-center"
         style={{ background: COLORS.gold }}
@@ -451,12 +554,27 @@ function Header({ sendNetwork, receiveNetwork }) {
       <span className="mb-display text-lg font-semibold tracking-tight">
         MoneyBridge
       </span>
+      </div>
+      {(sendNetwork || receiveNetwork) && (
+        <span className="text-[11px]" style={{ color: COLORS.textMuted }}>
+          Transfert en cours
+        </span>
+      )}
     </div>
   );
 }
 
 function StepDots({ step }) {
-  const labels = ["J'envoie", "Je reçois", "Mes infos", "Réception", "Paiement"];
+  const labels = [
+    "Pays d'envoi",
+    "Réseau",
+    "Montant",
+    "Pays de réception",
+    "Réseau",
+    "Mes infos",
+    "Réception",
+    "Paiement",
+  ];
   return (
     <div className="flex items-center gap-1.5 mb-8">
       {labels.map((label, i) => {
@@ -480,54 +598,95 @@ function StepDots({ step }) {
 
 function Welcome({ onStart }) {
   return (
-    <div>
+    <div className="pb-4">
       <div
-        className="mb-pulse text-xs tracking-widest uppercase mb-3"
-        style={{ color: COLORS.teal, letterSpacing: "0.15em" }}
+        className="rounded-3xl p-5 mb-6 relative overflow-hidden"
+        style={{
+          background: `linear-gradient(145deg, ${COLORS.bgCardAlt}, ${COLORS.bgCard})`,
+          border: `1px solid ${COLORS.border}`,
+        }}
       >
-        1 MAD → {DIRECTIONAL_RATES.XOF.madToCurrency} XOF · {DIRECTIONAL_RATES.XOF.currencyToMad} XOF → 1 MAD
-        <br />
-        1 MAD → {DIRECTIONAL_RATES.XAF.madToCurrency} XAF · {DIRECTIONAL_RATES.XAF.currencyToMad} XAF → 1 MAD
-      </div>
-      <h1 className="mb-display text-3xl font-bold leading-tight mb-4">
-        Envoyez de l'argent entre le Maroc et l'Afrique de l'Ouest
-      </h1>
-      <p className="mb-6 leading-relaxed" style={{ color: COLORS.textMuted }}>
-        MoneyBridge relie CIH Bank, Al Barid Bank, Orange Money et WAVE. Vous
-        choisissez d'où part l'argent et où il arrive, on calcule le montant
-        reçu au taux du jour, et votre demande est traitée en moins de 10
-        minutes.
-      </p>
+        <div
+          className="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold mb-5"
+          style={{ background: "rgba(31,138,120,0.14)", color: COLORS.goldSoft }}
+        >
+          <ShieldCheck size={14} />
+          Simple · Rapide · Transparent
+        </div>
 
-      <div
-        className="rounded-2xl p-4 mb-8 space-y-4"
-        style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
-      >
-        <HowItWorksRow
-          icon={ArrowRight}
-          title="1. Choisissez l'envoi"
-          text="Réseau d'origine et montant à envoyer."
-        />
-        <HowItWorksRow
-          icon={Repeat}
-          title="2. Choisissez la réception"
-          text="Réseau de destination, montant converti automatiquement."
-        />
-        <HowItWorksRow
-          icon={ShieldCheck}
-          title="3. Payez et confirmez"
-          text="Coordonnées affichées selon le réseau, preuve de paiement à l'appui."
-        />
+        <div className="text-xs tracking-widest uppercase mb-3"
+          style={{ color: COLORS.teal, letterSpacing: "0.15em" }}>
+          MONEYBRIDGE
+        </div>
+
+        <h1 className="mb-display text-3xl font-bold leading-tight mb-4">
+          Bienvenue sur MoneyBridge 👋
+        </h1>
+
+        <p className="leading-relaxed mb-5" style={{ color: COLORS.textMuted }}>
+          Envoyez de l'argent entre le Maroc et l'Afrique de l'Ouest et de l'Est.
+          MoneyBridge relie CIH Bank, Al Barid Bank, Attijariwafa bank, BMCE,
+          Banque Populaire, Orange Money, WAVE Money, Airtel Money, etc.
+        </p>
+
+        <p className="text-sm leading-relaxed mb-6" style={{ color: COLORS.textPrimary }}>
+          Vous choisissez d'où part l'argent et où il arrive, nous calculons le
+          montant reçu selon le taux applicable, et votre demande est traitée
+          en moins de 10 minutes.
+        </p>
+
+        <button
+          onClick={onStart}
+          className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{ background: COLORS.gold, color: COLORS.bg }}
+        >
+          Commencer un transfert <ArrowRight size={18} />
+        </button>
       </div>
 
-      <button
-        onClick={onStart}
-        className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
-        style={{ background: COLORS.gold, color: COLORS.bg }}
-      >
-        Commencer <ArrowRight size={18} />
-      </button>
+      <div className="mb-7">
+        <h2 className="mb-display text-xl font-semibold mb-1">Comment ça marche ?</h2>
+        <p className="text-sm mb-4" style={{ color: COLORS.textMuted }}>
+          Quelques étapes pour envoyer votre argent.
+        </p>
+
+        <div
+          className="rounded-2xl p-4 space-y-4"
+          style={{ background: COLORS.bgCard, border: `1px solid ${COLORS.border}` }}
+        >
+          <HowItWorksRow icon={ArrowRight} title="1. Choisissez le pays d'envoi" text="Indiquez le pays depuis lequel l'argent part." />
+          <HowItWorksRow icon={Smartphone} title="2. Choisissez le réseau d'envoi" text="Les réseaux disponibles s'adaptent automatiquement au pays." />
+          <HowItWorksRow icon={ArrowRight} title="3. Choisissez le pays de réception" text="Sélectionnez le pays dans lequel l'argent doit arriver." />
+          <HowItWorksRow icon={Smartphone} title="4. Choisissez le réseau de réception" text="Sélectionnez la banque ou le mobile money du bénéficiaire." />
+          <HowItWorksRow icon={Banknote} title="5. Indiquez le montant" text="Le montant reçu et les frais sont calculés automatiquement." />
+          <HowItWorksRow icon={CheckCircle2} title="6. Confirmez votre demande" text="Effectuez le paiement puis envoyez votre preuve sur WhatsApp." />
+        </div>
+      </div>
+
+      <Footer />
     </div>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="mt-8 pt-6 text-center"
+      style={{ borderTop: `1px solid ${COLORS.border}` }}>
+      <div className="mb-display font-semibold mb-2">MoneyBridge</div>
+      <p className="text-xs leading-relaxed mb-4" style={{ color: COLORS.textMuted }}>
+        Transferts d'argent entre le Maroc et l'Afrique.
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs mb-4">
+        <button style={{ color: COLORS.textMuted }}>À propos de nous</button>
+        <button style={{ color: COLORS.textMuted }}>Contactez-nous</button>
+        <button style={{ color: COLORS.textMuted }}>Comment ça marche ?</button>
+        <button style={{ color: COLORS.textMuted }}>Conditions</button>
+        <button style={{ color: COLORS.textMuted }}>Confidentialité</button>
+      </div>
+      <div className="text-[11px]" style={{ color: COLORS.textMuted }}>
+        © 2026 MoneyBridge — Tous droits réservés.
+      </div>
+    </footer>
   );
 }
 
@@ -550,10 +709,10 @@ function HowItWorksRow({ icon: Icon, title, text }) {
   );
 }
 
-function NetworkPicker({ selectedId, onSelect }) {
+function NetworkPicker({ networks, selectedId, onSelect }) {
   return (
     <div className="grid grid-cols-2 gap-2.5">
-      {NETWORKS.map((n) => {
+      {networks.map((n) => {
         const Icon = n.icon;
         const active = selectedId === n.id;
         return (
@@ -578,6 +737,79 @@ function NetworkPicker({ selectedId, onSelect }) {
   );
 }
 
+function CountryStep({ title, subtitle, selectedId, onSelect, canGoNext, onNext, onBack }) {
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">{title}</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>{subtitle}</p>
+
+      <div className="space-y-2.5">
+        {COUNTRIES.map((country) => {
+          const active = selectedId === country.id;
+          return (
+            <button
+              key={country.id}
+              onClick={() => onSelect(country.id)}
+              className="mb-btn w-full rounded-2xl p-4 flex items-center justify-between text-left"
+              style={{
+                background: active ? "rgba(201,162,39,0.12)" : COLORS.bgCard,
+                border: `1.5px solid ${active ? COLORS.gold : COLORS.border}`,
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{country.flag}</span>
+                <div>
+                  <div className="text-sm font-semibold">{country.name}</div>
+                  <div className="text-xs mt-0.5" style={{ color: COLORS.textMuted }}>
+                    {country.networks.length} réseau{country.networks.length > 1 ? "x" : ""} disponible{country.networks.length > 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
+              {active && <CheckCircle2 size={19} color={COLORS.goldSoft} />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-2.5 mt-7">
+        {onBack && (
+          <button onClick={onBack} className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold"
+            style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}>
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <button onClick={onNext} disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{ background: canGoNext ? COLORS.gold : COLORS.border, color: canGoNext ? COLORS.bg : COLORS.textMuted }}>
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NetworkStep({ title, subtitle, networks, selectedId, onSelect, canGoNext, onNext, onBack }) {
+  return (
+    <div>
+      <h2 className="mb-display text-xl font-semibold mb-1">{title}</h2>
+      <p className="text-sm mb-5" style={{ color: COLORS.textMuted }}>{subtitle}</p>
+      <NetworkPicker networks={networks} selectedId={selectedId} onSelect={onSelect} />
+
+      <div className="flex gap-2.5 mt-7">
+        <button onClick={onBack} className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}>
+          <ArrowLeft size={18} />
+        </button>
+        <button onClick={onNext} disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{ background: canGoNext ? COLORS.gold : COLORS.border, color: canGoNext ? COLORS.bg : COLORS.textMuted }}>
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SendStep({
   sendNetworkId,
   setSendNetworkId,
@@ -598,7 +830,13 @@ function SendStep({
         Choisissez le réseau depuis lequel vous envoyez l'argent.
       </p>
 
-      <NetworkPicker selectedId={sendNetworkId} onSelect={setSendNetworkId} />
+      {!hideNetworkPicker && (
+        <NetworkPicker
+          networks={sendNetwork ? [sendNetwork] : []}
+          selectedId={sendNetworkId}
+          onSelect={setSendNetworkId}
+        />
+      )}
 
       {sendNetwork && (
         <div
@@ -650,17 +888,17 @@ function SendStep({
         </div>
       )}
 
-      <button
-        onClick={onNext}
-        disabled={!canGoNext}
-        className="mb-btn mb-display w-full py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2 mt-7"
-        style={{
-          background: canGoNext ? COLORS.gold : COLORS.border,
-          color: canGoNext ? COLORS.bg : COLORS.textMuted,
-        }}
-      >
-        Suivant <ArrowRight size={18} />
-      </button>
+      <div className="flex gap-2.5 mt-7">
+        <button onClick={onBack} className="mb-btn mb-display py-3.5 px-4 rounded-xl font-semibold"
+          style={{ background: COLORS.bgCard, color: COLORS.textPrimary, border: `1px solid ${COLORS.border}` }}>
+          <ArrowLeft size={18} />
+        </button>
+        <button onClick={onNext} disabled={!canGoNext}
+          className="mb-btn mb-display flex-1 py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2"
+          style={{ background: canGoNext ? COLORS.gold : COLORS.border, color: canGoNext ? COLORS.bg : COLORS.textMuted }}>
+          Suivant <ArrowRight size={18} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -668,6 +906,7 @@ function SendStep({
 function ReceiveStep({
   receiveNetworkId,
   setReceiveNetworkId,
+  receiveNetworks,
   sendNetwork,
   sendAmount,
   fee,
@@ -685,7 +924,7 @@ function ReceiveStep({
         Choisissez le réseau qui recevra l'argent.
       </p>
 
-      <NetworkPicker selectedId={receiveNetworkId} onSelect={setReceiveNetworkId} />
+      <NetworkPicker networks={receiveNetworks} selectedId={receiveNetworkId} onSelect={setReceiveNetworkId} />
 
       <div
         className="mt-6 rounded-xl p-4 space-y-2.5"
@@ -889,7 +1128,7 @@ function PaymentStep({
   onBack,
 }) {
   const info = PAY_INFO[sendNetwork.id];
-  const isCash = sendNetwork.id === "cash";
+  const isCash = sendNetwork?.type === "cash";
   return (
     <div>
       <h2 className="mb-display text-xl font-semibold mb-1">Paiement</h2>
@@ -1076,6 +1315,9 @@ function AdminPanel({ orders }) {
                 {o.clientPrenom} {o.clientNom} #{String(o.clientNumber).padStart(3, "0")}
                 {o.clientEmail ? ` · ${o.clientEmail}` : ""}
                 {o.receptionAccount ? ` · Réception : ${o.receptionAccount}` : ""}
+              </div>
+              <div className="text-xs mb-2" style={{ color: COLORS.textMuted }}>
+                {o.sendCountry?.flag} {o.sendCountry?.name} → {o.receiveCountry?.flag} {o.receiveCountry?.name}
               </div>
               <div className="flex items-center justify-between text-sm mb-1">
                 <span style={{ color: COLORS.textMuted }}>
