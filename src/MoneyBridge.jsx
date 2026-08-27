@@ -721,19 +721,16 @@ function Welcome({ onStart }) {
         </div>
 
         <h1 className="mb-display text-3xl font-bold leading-tight mb-4">
-          Bienvenue sur MoneyBridge 👋
+          Envoyez votre argent là où il doit aller.
         </h1>
 
         <p className="leading-relaxed mb-5" style={{ color: COLORS.textMuted }}>
-          Envoyez de l'argent entre le Maroc et l'Afrique de l'Ouest et de l'Est.
-          MoneyBridge relie CIH Bank, Al Barid Bank, Attijariwafa bank, BMCE,
-          Banque Populaire, Orange Money, WAVE Money, Airtel Money, etc.
+          Maroc, Côte d'Ivoire, Gabon et bientôt bien plus.
         </p>
 
         <p className="text-sm leading-relaxed mb-6" style={{ color: COLORS.textPrimary }}>
-          Vous choisissez d'où part l'argent et où il arrive, nous calculons le
-          montant reçu selon le taux applicable, et votre demande est traitée
-          en moins de 10 minutes.
+          Envoyez et recevez votre argent à travers plusieurs pays et réseaux,
+          depuis une seule plateforme, en quelques étapes.
         </p>
 
         <button
