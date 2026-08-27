@@ -292,6 +292,18 @@ function formatAmount(n, currency) {
   return `${n.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${currency}`;
 }
 
+// Nombre de chiffres attendu pour le numéro de compte de réception, selon
+// le type de réseau : 10 chiffres pour un numéro mobile money, 16 pour un
+// numéro de compte bancaire classique, 8 pour Al Barid Bank spécifiquement.
+function accountDigitsFor(network) {
+  if (network.type === "mobile") return 10;
+  if (network.type === "bank") return network.id === "albarid" ? 8 : 16;
+  return null; // espèces : aucune coordonnée requise
+}
+
+// Un RIB fait toujours 24 chiffres, quelle que soit la banque.
+const RIB_DIGITS = 24;
+
 function computeFee(amount, currency) {
   if (!amount || amount <= 0) return 0;
 
@@ -334,6 +346,7 @@ function buildWhatsAppMessage({
   clientPrenom,
   clientEmail,
   receptionAccount,
+  receptionRib,
 }) {
   const rateLine =
     sendNetwork.currency !== receiveNetwork.currency
@@ -360,7 +373,10 @@ function buildWhatsAppMessage({
     `Montant à recevoir : ${formatAmount(receiveAmount, receiveNetwork.currency)}`,
   ];
   if (receptionAccount) {
-    lines.push(`Coordonnées de réception : ${receptionAccount}`);
+    lines.push(`Numéro de compte (réception) : ${receptionAccount}`);
+  }
+  if (receptionRib) {
+    lines.push(`RIB (réception) : ${receptionRib}`);
   }
   lines.push("", `💰 Frais MoneyBridge : ${formatAmount(feeMAD, "MAD")}`);
   if (rateLine) lines.push(rateLine);
@@ -388,6 +404,7 @@ export default function MoneyBridge() {
   const [clientPrenom, setClientPrenom] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [receptionAccount, setReceptionAccount] = useState("");
+  const [receptionRib, setReceptionRib] = useState("");
 
   // Accès admin caché : ajouter #admin à l'URL (ex: monsite.com/#admin).
   // Invisible et inaccessible pour un visiteur normal qui ne connaît pas
@@ -437,7 +454,13 @@ export default function MoneyBridge() {
   const canGoStep3 = Boolean(receiveCountryId);
   const canGoStep4 = receiveNetwork && receiveAmount !== null;
   const canGoStep5 = Boolean(clientNom.trim() && clientPrenom.trim());
-  const canGoStep6 = receiveNetwork?.type === "cash" || Boolean(receptionAccount.trim());
+  const receiveAccountDigits = receiveNetwork ? accountDigitsFor(receiveNetwork) : null;
+  const canGoStep6 =
+    receiveNetwork?.type === "cash" ||
+    (receiveNetwork?.type === "mobile" && receptionAccount.length === 10) ||
+    (receiveNetwork?.type === "bank" &&
+      receptionAccount.length === receiveAccountDigits &&
+      receptionRib.length === RIB_DIGITS);
   const canSubmit = Boolean(sendNetwork && receiveNetwork);
   const [orders, setOrders] = useState([]);
 
@@ -451,6 +474,7 @@ export default function MoneyBridge() {
     setClientPrenom("");
     setClientEmail("");
     setReceptionAccount("");
+    setReceptionRib("");
     setStep(0);
   };
 
@@ -563,6 +587,8 @@ export default function MoneyBridge() {
             receiveNetwork={receiveNetwork}
             receptionAccount={receptionAccount}
             setReceptionAccount={setReceptionAccount}
+            receptionRib={receptionRib}
+            setReceptionRib={setReceptionRib}
             canGoNext={canGoStep6}
             onNext={() => setStep(7)}
             onBack={() => setStep(5)}
@@ -602,6 +628,7 @@ export default function MoneyBridge() {
                   clientPrenom,
                   clientEmail,
                   receptionAccount,
+                  receptionRib,
                 },
                 ...prev,
               ]);
@@ -621,6 +648,7 @@ export default function MoneyBridge() {
                 clientPrenom,
                 clientEmail,
                 receptionAccount,
+                receptionRib,
               });
               window.open(
                 `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`,
@@ -1188,17 +1216,15 @@ function ReceptionCoordsStep({
   receiveNetwork,
   receptionAccount,
   setReceptionAccount,
+  receptionRib,
+  setReceptionRib,
   canGoNext,
   onNext,
   onBack,
 }) {
   const isCash = receiveNetwork.type === "cash";
-  const label =
-    receiveNetwork.type === "mobile"
-      ? "Numéro de téléphone (réception)"
-      : receiveNetwork.type === "bank"
-      ? "Numéro de compte / RIB (réception)"
-      : "Coordonnées de réception";
+  const isBank = receiveNetwork.type === "bank";
+  const accountDigits = accountDigitsFor(receiveNetwork);
 
   return (
     <div>
@@ -1218,12 +1244,27 @@ function ReceptionCoordsStep({
             Un agent MoneyBridge vous contactera pour organiser la remise.
           </span>
         </div>
+      ) : isBank ? (
+        <div className="space-y-3">
+          <DigitField
+            placeholder="Numéro de compte"
+            value={receptionAccount}
+            onChange={setReceptionAccount}
+            maxDigits={accountDigits}
+          />
+          <DigitField
+            placeholder="RIB"
+            value={receptionRib}
+            onChange={setReceptionRib}
+            maxDigits={RIB_DIGITS}
+          />
+        </div>
       ) : (
-        <ClientField
-          placeholder={label}
+        <DigitField
+          placeholder="Numéro de téléphone (réception)"
           value={receptionAccount}
           onChange={setReceptionAccount}
-          type={receiveNetwork.type === "mobile" ? "tel" : "text"}
+          maxDigits={10}
         />
       )}
 
@@ -1366,6 +1407,36 @@ function ClientField({ placeholder, value, onChange, type = "text" }) {
   );
 }
 
+// Champ numérique qui n'accepte que des chiffres, limité à un nombre exact
+// de caractères, avec un compteur et un retour visuel si incomplet.
+function DigitField({ placeholder, value, onChange, maxDigits }) {
+  const complete = value.length === maxDigits;
+  const showError = value.length > 0 && !complete;
+  return (
+    <div>
+      <input
+        className="mb-input w-full rounded-xl px-4 py-3 text-sm font-semibold"
+        style={{
+          background: COLORS.bgCard,
+          border: `1.5px solid ${showError ? COLORS.danger : complete ? COLORS.teal : COLORS.border}`,
+          color: COLORS.textPrimary,
+        }}
+        type="tel"
+        inputMode="numeric"
+        placeholder={`${placeholder} (${maxDigits} chiffres)`}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, maxDigits))}
+      />
+      <div
+        className="text-xs mt-1.5"
+        style={{ color: showError ? COLORS.danger : COLORS.textMuted }}
+      >
+        {value.length}/{maxDigits} chiffres
+      </div>
+    </div>
+  );
+}
+
 function Confirmation({ isCash, onNewOrder }) {
   return (
     <div className="flex flex-col items-center text-center pt-10">
@@ -1460,6 +1531,7 @@ function AdminPanel({ orders }) {
                 {o.clientPrenom} {o.clientNom} #{String(o.clientNumber).padStart(3, "0")}
                 {o.clientEmail ? ` · ${o.clientEmail}` : ""}
                 {o.receptionAccount ? ` · Réception : ${o.receptionAccount}` : ""}
+                {o.receptionRib ? ` (RIB ${o.receptionRib})` : ""}
               </div>
               <div className="flex items-center justify-between text-sm mb-1">
                 <span style={{ color: COLORS.textMuted }}>
