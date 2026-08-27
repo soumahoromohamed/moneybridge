@@ -37,6 +37,8 @@ const DIRECTIONAL_RATES = {
   XAF: { madToCurrency: 60, currencyToMad: 62 },
   // Franc congolais (CDF, RD Congo).
   CDF: { madToCurrency: 244.85, currencyToMad: 254 },
+  // Franc guinéen (GNF, Guinée).
+  GNF: { madToCurrency: 935, currencyToMad: 988 },
 };
 
 // Taux directs entre certaines paires de devises, quand ils ont été
@@ -45,7 +47,8 @@ const DIRECTIONAL_RATES = {
 // via une conversion CDF -> MAD -> XOF).
 const CROSS_RATES = {
   CDF: { XOF: 1 / 5 }, // 5 CDF = 1 XOF (envoi depuis la RD Congo vers la Côte d'Ivoire)
-  XOF: { CDF: 3.5 }, // 1 XOF = 3,5 CDF (envoi depuis la Côte d'Ivoire vers la RD Congo)
+  XOF: { CDF: 3.5, GNF: 15.5 }, // 1 XOF = 3,5 CDF · 1 XOF = 15,5 GNF
+  GNF: { XOF: 1 / 17.7 }, // 17,7 GNF = 1 XOF (envoi depuis la Guinée vers la Côte d'Ivoire)
 };
 
 // Convertit un montant d'une devise à une autre en appliquant le bon taux
@@ -95,6 +98,10 @@ function minSendFor(currency) {
     // Seuil équivalent en CDF au taux courant (voir avertissement sur DIRECTIONAL_RATES.CDF).
     return MIN_SEND_MAD * DIRECTIONAL_RATES.CDF.madToCurrency;
   }
+  if (currency === "GNF") {
+    // Seuil équivalent en GNF au taux courant (voir avertissement sur DIRECTIONAL_RATES.GNF).
+    return MIN_SEND_MAD * DIRECTIONAL_RATES.GNF.madToCurrency;
+  }
   return MIN_SEND_CFA; // XOF et XAF utilisent tous deux le seuil de 15 000 CFA
 }
 
@@ -105,9 +112,13 @@ function minSendFor(currency) {
 const COUNTRIES = [
   { id: "ma", name: "Maroc", flag: "🇲🇦", currency: "MAD" },
   { id: "ci", name: "Côte d'Ivoire", flag: "🇨🇮", currency: "XOF" },
+  { id: "bf", name: "Burkina Faso", flag: "🇧🇫", currency: "XOF" },
   { id: "ga", name: "Gabon", flag: "🇬🇦", currency: "XAF" },
   { id: "cg", name: "Congo Brazzaville", flag: "🇨🇬", currency: "XAF" },
   { id: "cd", name: "Congo RDC", flag: "🇨🇩", currency: "CDF" },
+  { id: "gn", name: "Guinée", flag: "🇬🇳", currency: "GNF" },
+  { id: "bj", name: "Bénin", flag: "🇧🇯", currency: "XOF" },
+  { id: "tg", name: "Togo", flag: "🇹🇬", currency: "XOF" },
 ];
 
 const NETWORKS = [
@@ -117,8 +128,8 @@ const NETWORKS = [
   { id: "bmce", name: "BMCE Bank of Africa", countries: ["ma"], currency: "MAD", type: "bank", icon: Building2 },
   { id: "banquepop", name: "Banque Populaire", countries: ["ma"], currency: "MAD", type: "bank", icon: Building2 },
   { id: "cash", name: "En espèces", countries: ["ma"], currency: "MAD", type: "cash", icon: Banknote },
-  { id: "orange", name: "Orange Money", countries: ["ci"], currency: "XOF", type: "mobile", icon: Smartphone },
-  { id: "wave", name: "WAVE Money", countries: ["ci"], currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "orange", name: "Orange Money", countries: ["ci", "bf"], currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "wave", name: "WAVE Money", countries: ["ci", "bf"], currency: "XOF", type: "mobile", icon: Smartphone },
   // Airtel Money existe au Gabon et au Congo Brazzaville, tous deux en XAF
   // — on garde donc un seul réseau "airtel" pour les deux pays.
   { id: "airtel", name: "Airtel Money", countries: ["ga", "cg"], currency: "XAF", type: "mobile", icon: Smartphone },
@@ -128,6 +139,15 @@ const NETWORKS = [
   // y ont donc leurs propres entrées, distinctes de celles en XAF/XOF.
   { id: "orange_cd", name: "Orange Money", countries: ["cd"], currency: "CDF", type: "mobile", icon: Smartphone },
   { id: "airtel_cd", name: "Airtel Money", countries: ["cd"], currency: "CDF", type: "mobile", icon: Smartphone },
+  // La Guinée utilise le GNF (pas le XOF) : Orange Money y a donc sa
+  // propre entrée, distincte de celle en XOF (Côte d'Ivoire/Burkina Faso).
+  { id: "orange_gn", name: "Orange Money", countries: ["gn"], currency: "GNF", type: "mobile", icon: Smartphone },
+  // MTN Money et Moov Money existent aussi au Bénin/Togo, mais en XOF
+  // (contrairement au Congo Brazzaville/Gabon en XAF) : ce sont donc des
+  // entrées à part, avec leur propre devise.
+  { id: "mtn_bj", name: "MTN Money", countries: ["bj"], currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "moov_xof", name: "Moov Money", countries: ["bj", "tg"], currency: "XOF", type: "mobile", icon: Smartphone },
+  { id: "tmoney", name: "TMoney", countries: ["tg"], currency: "XOF", type: "mobile", icon: Smartphone },
 ];
 
 function networksForCountry(countryId) {
@@ -220,6 +240,38 @@ const PAY_INFO = {
   },
   // ⚠️ Coordonnées à compléter avec tes vraies infos Airtel Money (RD Congo).
   airtel_cd: {
+    nom: "",
+    prenom: "",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
+  },
+  // ⚠️ Coordonnées à compléter avec tes vraies infos Orange Money (Guinée).
+  orange_gn: {
+    nom: "",
+    prenom: "",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
+  },
+  // ⚠️ Coordonnées à compléter avec tes vraies infos MTN Money (Bénin).
+  mtn_bj: {
+    nom: "",
+    prenom: "",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
+  },
+  // ⚠️ Coordonnées à compléter avec tes vraies infos Moov Money (Bénin/Togo).
+  moov_xof: {
+    nom: "",
+    prenom: "",
+    numeroCompte: "",
+    rib: "",
+    note: "À convenir avec un agent MoneyBridge après votre demande",
+  },
+  // ⚠️ Coordonnées à compléter avec tes vraies infos TMoney (Togo).
+  tmoney: {
     nom: "",
     prenom: "",
     numeroCompte: "",
@@ -519,6 +571,7 @@ export default function MoneyBridge() {
 
         {step === 7 && (
           <PaymentStep
+            sendCountry={sendCountry}
             sendNetwork={sendNetwork}
             sendAmount={sendAmount}
             fee={fee}
@@ -1202,6 +1255,7 @@ function ReceptionCoordsStep({
 }
 
 function PaymentStep({
+  sendCountry,
   sendNetwork,
   sendAmount,
   fee,
@@ -1212,11 +1266,22 @@ function PaymentStep({
 }) {
   const info = PAY_INFO[sendNetwork.id];
   const isCash = sendNetwork.id === "cash";
+
+  // Les vraies coordonnées Orange Money / WAVE ne sont configurées que pour
+  // la Côte d'Ivoire. Pour tout autre pays partageant ce même réseau
+  // (ex: Burkina Faso), on affiche "à convenir avec un agent" même si le
+  // réseau a par ailleurs de vraies coordonnées pour la Côte d'Ivoire.
+  const isSharedNetworkOutsideCI =
+    sendCountry && sendCountry.id !== "ci" && sendNetwork.countries.includes("ci");
+  const displayNote = isSharedNetworkOutsideCI
+    ? "À convenir avec un agent MoneyBridge après votre demande"
+    : info.note;
+
   return (
     <div>
       <h2 className="mb-display text-xl font-semibold mb-1">Paiement</h2>
       <p className="text-sm mb-1" style={{ color: COLORS.textMuted }}>
-        {info.note
+        {displayNote
           ? `Préparez ${formatAmount(sendAmount, sendNetwork.currency)}. Un agent MoneyBridge vous contactera pour la suite.`
           : `Envoyez ${formatAmount(sendAmount, sendNetwork.currency)} vers les coordonnées ${sendNetwork.name} ci-dessous.`}
       </p>
@@ -1224,7 +1289,7 @@ function PaymentStep({
         Frais MoneyBridge inclus : {formatAmount(feeMAD, "MAD")} (déjà déduits du montant reçu).
       </p>
 
-      {info.note ? (
+      {displayNote ? (
         <div
           className="rounded-xl p-4 mb-5"
           style={{ background: COLORS.bgCard, border: `1.5px solid ${COLORS.gold}` }}
@@ -1232,7 +1297,7 @@ function PaymentStep({
           <div className="text-xs uppercase tracking-wide mb-1" style={{ color: COLORS.textMuted }}>
             {isCash ? "Point de dépôt espèces" : sendNetwork.name}
           </div>
-          <div className="text-sm font-semibold">{info.note}</div>
+          <div className="text-sm font-semibold">{displayNote}</div>
         </div>
       ) : (
         <div
